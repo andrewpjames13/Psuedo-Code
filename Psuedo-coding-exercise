@@ -1,0 +1,109 @@
+# User class we are defined active record base is inherited from
+# Defining a class called user, class is a keyword and an object,
+# User is a constant, inherits from ActiveRecord base with a namespace base
+class User < ActiveRecord::Base
+  # enumerable, this is a rails thing, maps names to numbers in db and validates the attribute is one of those things
+  # enum is a class method (class method because its not in a definition its just in the class)
+  enum role: [ :user, :instructor, :galvanizer ]
+  enum status: [ :active, :inactive ]
+  # validates is a class method in rails, ensure that only valid data is saved in the db
+  # valideates has to have atleast two arguments one attribute and then a hash. The attribute (:greenhouse_candidate_id) is a column in a table in the db
+  validates :greenhouse_candidate_id, uniqueness: {allow_blank: true}
+  validates :email, :uniqueness => {:case_sensitive => false}
+  validates :github_id, :uniqueness => { :case_sensitive => false, :allow_nil => true }
+  validates :email, :first_name, :last_name, :presence => true
+  # format symbol has a hash with regex literal and message string literal as values
+  validates :linkedin,
+            format: {
+              with: /\Ahttps?:\/\/.+/,
+              message: "must be a full URL that starts with 'http'",
+              allow_blank: true,
+            }
+  # class method with a block containing a conditional expression
+  # self is a keyword that refers to the current instance of the user object
+  # SecureRandom - class
+  before_validation do
+    unless auth_token?
+      self.auth_token = SecureRandom.uuid
+    end
+  end
+
+  # has_many is a class method :enrollments is a symbol, through: :enrollment is a key value pair that is a hash
+  # has_many requires atleast one argument in the form of a symbol
+  has_many :enrollments
+  has_many :student_deadlines
+  has_many :cohorts, through: :enrollments
+  has_many :submissions, dependent: :destroy
+  has_many :employments, dependent: :destroy
+  has_many :staffings, dependent: :destroy
+  has_many :student_stories, dependent: :destroy
+  has_many :submitted_exercises
+  has_one :employment_profile, dependent: :destroy
+
+  # class method inheriting from a class through the carrierwave gem
+  # we pass the class method a symbol and a class constant
+  mount_uploader :avatar, AvatarUploader
+
+  # scope is a class method takes a symbol as an argument
+  # scope passed a name (:orderd  symbol) a body and a block
+  # dash rocket is a method without a name... stabby lamda
+  scope :ordered, ->{ order('lower(first_name), lower(last_name)') }
+
+  # method on the User class, takes one argument
+  def self.for_cohort(cohort)
+    # joins class method .references is a method on the object that joins returns.
+    # Repeat for .where
+    # .where has a hash with a symbol used as a key, enrollments has a value that is a hash with multiple key value pairs
+    joins(:enrollments).references(:enrollments).where(
+      enrollments: {cohort_id: cohort, role: Enrollment.roles['student']}
+    ).ordered
+  end
+
+  # is an instance method
+  # enrollments is a method on whatever instance object its being called on
+  # each following method is being called on the returned object
+  # .try is being passsed an argument in the form of a symbol
+  # .try returns nil instead of raising an exception
+  def current_cohort
+    enrollments.enrolled.first.try(:cohort)
+  end
+
+  # cohort_exercises is an instance method
+  # ternary operator which is an if else one liner
+  # if there is a current_cohort do .order_added_exercises on it if not return an empty array
+  def cohort_exercises
+    current_cohort ? current_cohort.order_added_exercises : []
+  end
+
+  # instance method that you can call on an instance of the user object
+  # submissions is an instance method
+  def completed_exercises
+    submissions.includes(:exercise).map(&:exercise)
+  end
+
+  def incomplete_exercises
+    cohort_exercises - completed_exercises
+  end
+
+  # string interpolation
+  def full_name
+    "#{first_name} #{last_name}"
+  end
+
+  def github_url
+    "https://github.com/#{github_username}"
+  end
+
+
+  def twitter_url
+    if twitter =~ /https?:\/\//
+      twitter
+    else
+      "https://twitter.com/#{twitter}"
+    end
+  end
+
+  def is_employed?
+    employments.active.present?
+  end
+end
